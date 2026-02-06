@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="sv">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>VGR Leverantörsfakturor – Sök</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>VGR Leverantörsfakturor</h1>
+      <p class="subtitle">Sök bland Västra Götalandsregionens leverantörsfakturor (878 000+ rader)</p>
+    </header>
+
+    <div class="field-filters" id="fieldFilters">
+      <label>Förvaltning
+        <div class="ac-wrap">
+          <input type="text" id="filterForvaltning" placeholder="t.ex. Sahlgrenska" autocomplete="off">
+          <ul class="ac-list" id="ac-forvaltning"></ul>
+        </div>
+      </label>
+      <label>Kontotext
+        <div class="ac-wrap">
+          <input type="text" id="filterKontoText" placeholder="t.ex. Läkemedel" autocomplete="off">
+          <ul class="ac-list" id="ac-konto_text"></ul>
+        </div>
+      </label>
+      <label>Leverantör
+        <div style="display:flex;gap:6px;align-items:center;">
+          <div class="ac-wrap" style="flex:1;">
+            <input type="text" id="filterLeverantor" placeholder="t.ex. Ericsson" autocomplete="off">
+            <ul class="ac-list" id="ac-leverantor"></ul>
+          </div>
+          <button class="catalog-toggle" onclick="toggleLevPanel()">
+            <span id="levArrow">&#9654;</span> Leverantörskatalog
+          </button>
+        </div>
+      </label>
+      <label>Konto nr
+        <div style="display:flex;gap:6px;align-items:center;">
+          <input type="text" id="filterKontoNr" placeholder="t.ex. 6419">
+          <button class="catalog-toggle" onclick="toggleKontoPanel()">
+            <span id="kontoArrow">&#9654;</span> Kontokatalog
+          </button>
+        </div>
+      </label>
+      <label>Leverantörs-ID <input type="text" id="filterLevId" placeholder="Org.nr"></label>
+      <label>Datum fr.o.m. <input type="date" id="filterDateFrom"></label>
+      <label>Datum t.o.m. <input type="date" id="filterDateTo"></label>
+      <div class="period-row">
+        <span class="period-label">Snabbval:</span>
+        <button class="period-btn" onclick="setPeriodMode('week')">Vecka</button>
+        <button class="period-btn" onclick="setPeriodMode('month')">Månad</button>
+        <button class="period-btn" onclick="setPeriodMode('quarter')">Kvartal</button>
+        <button class="period-btn" onclick="setPeriodMode('year')">År</button>
+        <button class="period-btn" onclick="setPeriodMode(null)">Rensa</button>
+        <div class="period-nav" id="periodNav" style="display:none;">
+          <button onclick="stepPeriod(-1)" title="Föregående">&larr;</button>
+          <span class="period-current" id="periodLabel"></span>
+          <button onclick="stepPeriod(1)" title="Nästa">&rarr;</button>
+        </div>
+      </div>
+      <div class="catalog-panel" id="levPanel">
+        <div class="catalog-header">
+          <h2>Leverantörskatalog</h2>
+          <span class="catalog-status" id="levStatus"></span>
+        </div>
+        <div class="catalog-search">
+          <input type="text" id="levSearchInput" placeholder="Filtrera leverantörer..." oninput="filterLevList()">
+        </div>
+        <div class="catalog-grid" id="levGrid"></div>
+      </div>
+      <div class="catalog-panel" id="kontoPanel">
+        <div class="catalog-header">
+          <h2>Kontokatalog</h2>
+          <span class="catalog-status" id="kontoStatus"></span>
+        </div>
+        <div class="catalog-search">
+          <input type="text" id="kontoSearchInput" placeholder="Filtrera konton..." oninput="filterKontoList()">
+        </div>
+        <div class="catalog-grid" id="kontoGrid"></div>
+      </div>
+      <div class="filter-actions">
+        <button class="filter-search-btn" id="searchBtn" onclick="doSearch()">Sök</button>
+        <button class="filter-clear-btn" onclick="clearAllFilters()">Rensa filter</button>
+      </div>
+    </div>
+
+    <div class="progress-bar" id="progressBar"><div class="fill" id="progressFill"></div></div>
+
+    <div class="status-bar">
+      <span id="statusText">Ange minst ett filter och tryck Sök.</span>
+      <div class="toolbar">
+        <button class="tool-btn" onclick="exportCSV()" title="Exportera till CSV">CSV</button>
+      </div>
+    </div>
+
+    <table>
+      <thead>
+        <tr>
+          <th onclick="sortBy('bokforingsdatum')" id="th-bokforingsdatum">Datum</th>
+          <th onclick="sortBy('leverantor')" id="th-leverantor">Leverantör</th>
+          <th onclick="sortBy('forvaltning')" id="th-forvaltning" class="hide-mobile">Förvaltning</th>
+          <th onclick="sortBy('konto_text')" id="th-konto_text" class="hide-mobile">Kontotext</th>
+          <th onclick="sortBy('nettobelopp')" id="th-nettobelopp" style="text-align:right">Belopp</th>
+          <th onclick="sortBy('verifikationsnummer')" id="th-verifikationsnummer" class="hide-mobile">Verif.nr</th>
+        </tr>
+      </thead>
+      <tbody id="resultsBody"></tbody>
+    </table>
+
+    <div id="emptyMsg" class="empty" style="display:none;">Inga resultat hittades.</div>
+    <button id="loadMoreBtn" class="load-more" style="display:none;" onclick="loadMore()">Visa fler resultat</button>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
