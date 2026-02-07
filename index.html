@@ -1,15 +1,18 @@
 <!DOCTYPE html>
 <html lang="sv">
+
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>VGR Leverantörsfakturor – Sök</title>
   <link rel="stylesheet" href="style.css">
 </head>
+
 <body>
+  <div class="scanline"></div>
   <div class="container">
     <header>
-      <h1>VGR Leverantörsfakturor</h1>
+      <h1><span class="prompt">_></span> VGR Leverantörsfakturor</h1>
       <p class="subtitle">Sök bland Västra Götalandsregionens leverantörsfakturor (878 000+ rader)</p>
     </header>
 
@@ -87,7 +90,9 @@
       </div>
     </div>
 
-    <div class="progress-bar" id="progressBar"><div class="fill" id="progressFill"></div></div>
+    <div class="progress-bar" id="progressBar">
+      <div class="fill" id="progressFill"></div>
+    </div>
 
     <div class="status-bar">
       <span id="statusText">Ange minst ett filter och tryck Sök.</span>
@@ -116,4 +121,5 @@
 
   <script src="app.js"></script>
 </body>
+
 </html>
