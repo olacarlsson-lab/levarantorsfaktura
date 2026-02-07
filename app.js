@@ -8,6 +8,7 @@ let sortField = 'bokforingsdatum';
 let sortAsc = false;
 let isLoading = false;
 let visibleCount = PAGE_SIZE;
+let searchAbort = null;
 
 const searchBtn = document.getElementById('searchBtn');
 const resultsBody = document.getElementById('resultsBody');
@@ -135,23 +136,24 @@ function commonPrefix(a, b) {
   return a.substring(0, i);
 }
 
-async function fetchWithRetry(url, retries = 2, delay = 1000) {
+async function fetchWithRetry(url, retries = 2, delay = 1000, signal) {
   for (let i = 0; i <= retries; i++) {
     try {
-      const res = await fetch(url, { headers: { accept: 'application/json' } });
+      const res = await fetch(url, { headers: { accept: 'application/json' }, signal });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       return await res.json();
     } catch (err) {
+      if (err.name === 'AbortError') throw err;
       if (i === retries) throw err;
       await new Promise(r => setTimeout(r, delay * (i + 1)));
     }
   }
 }
 
-async function fetchAllPages(fieldParams, onProgress) {
+async function fetchAllPages(fieldParams, onProgress, signal) {
   const params = new URLSearchParams({ _limit: BATCH_LIMIT, _offset: 0, ...fieldParams });
   const url = API_BASE + '?' + params.toString();
-  const first = await fetchWithRetry(url);
+  const first = await fetchWithRetry(url, 2, 1000, signal);
   let results = first.results || [];
   const total = first.resultCount || 0;
 
@@ -169,14 +171,16 @@ async function fetchAllPages(fieldParams, onProgress) {
 
   async function worker() {
     while (idx < urls.length) {
+      if (signal && signal.aborted) return;
       const myUrl = urls[idx++];
       try {
-        const data = await fetchWithRetry(myUrl);
+        const data = await fetchWithRetry(myUrl, 2, 1000, signal);
         if (data.results) {
           results.push(...data.results);
           fetched += data.results.length;
         }
       } catch (e) {
+        if (e.name === 'AbortError') return;
         console.warn('Failed batch:', e);
       }
       if (onProgress) onProgress(fetched, total);
@@ -191,7 +195,10 @@ async function fetchAllPages(fieldParams, onProgress) {
 }
 
 async function fetchResults() {
-  if (isLoading) return;
+  if (searchAbort) searchAbort.abort();
+  const abort = new AbortController();
+  searchAbort = abort;
+
   isLoading = true;
   searchBtn.disabled = true;
   progressBar.classList.add('active');
@@ -215,9 +222,11 @@ async function fetchResults() {
     const countParams = new URLSearchParams({ _limit: 1, _offset: 0, ...filterParams });
     const countUrl = API_BASE + '?' + countParams.toString();
     try {
-      const countData = await fetchWithRetry(countUrl);
+      const countData = await fetchWithRetry(countUrl, 2, 1000, abort.signal);
       totalExpected = countData.resultCount || 0;
-    } catch (e) { /* ignore */ }
+    } catch (e) {
+      if (e.name === 'AbortError') return;
+    }
 
     statusText.innerHTML = '<span class="spinner"></span>Hämtar ' +
       formatNum(totalExpected) + ' rader...';
@@ -226,7 +235,7 @@ async function fetchResults() {
       totalFetched = fetched;
       totalExpected = total;
       updateProgressBar();
-    });
+    }, abort.signal);
     allResults = res.results;
 
     progressFill.style.width = '100%';
@@ -234,34 +243,46 @@ async function fetchResults() {
 
     renderResults();
   } catch (err) {
+    if (err.name === 'AbortError') return;
     statusText.textContent = 'Fel vid sökning: ' + err.message;
     progressBar.classList.remove('active');
     console.error(err);
   } finally {
-    isLoading = false;
-    searchBtn.disabled = false;
+    if (searchAbort === abort) {
+      isLoading = false;
+      searchBtn.disabled = false;
+    }
   }
 }
 
 function renderResults() {
-  let filtered = allResults;
   const dateFrom = document.getElementById('filterDateFrom').value;
   const dateTo = document.getElementById('filterDateTo').value;
 
-  if (dateFrom) filtered = filtered.filter(r => r.bokforingsdatum >= dateFrom);
-  if (dateTo) filtered = filtered.filter(r => r.bokforingsdatum <= dateTo);
+  let filtered;
+  if (dateFrom && dateTo) {
+    filtered = allResults.filter(r => r.bokforingsdatum >= dateFrom && r.bokforingsdatum <= dateTo);
+  } else if (dateFrom) {
+    filtered = allResults.filter(r => r.bokforingsdatum >= dateFrom);
+  } else if (dateTo) {
+    filtered = allResults.filter(r => r.bokforingsdatum <= dateTo);
+  } else {
+    filtered = allResults.slice();
+  }
 
-  filtered.sort((a, b) => {
-    let va = a[sortField] || '';
-    let vb = b[sortField] || '';
-    if (sortField === 'nettobelopp') {
-      va = parseFloat(va) || 0;
-      vb = parseFloat(vb) || 0;
-    }
-    if (va < vb) return sortAsc ? -1 : 1;
-    if (va > vb) return sortAsc ? 1 : -1;
-    return 0;
-  });
+  const isNumeric = sortField === 'nettobelopp';
+  const dir = sortAsc ? 1 : -1;
+  if (isNumeric) {
+    filtered.sort((a, b) => (((parseFloat(a.nettobelopp)) || 0) - ((parseFloat(b.nettobelopp)) || 0)) * dir);
+  } else {
+    filtered.sort((a, b) => {
+      const va = a[sortField] || '';
+      const vb = b[sortField] || '';
+      if (va < vb) return -dir;
+      if (va > vb) return dir;
+      return 0;
+    });
+  }
 
   displayedResults = filtered;
 
@@ -282,10 +303,12 @@ function renderResults() {
   emptyMsg.style.display = 'none';
 
   const show = filtered.slice(0, visibleCount);
+  const frag = document.createDocumentFragment();
   for (const row of show) {
-    resultsBody.appendChild(createRow(row));
-    resultsBody.appendChild(createDetailRow(row));
+    frag.appendChild(createRow(row));
+    frag.appendChild(createDetailRow(row));
   }
+  resultsBody.appendChild(frag);
 
   updateLoadMoreBtn(filtered.length);
 
@@ -309,10 +332,12 @@ function loadMore() {
   visibleCount += PAGE_SIZE;
   const from = resultsBody.children.length / 2;
   const show = displayedResults.slice(from, visibleCount);
+  const frag = document.createDocumentFragment();
   for (const row of show) {
-    resultsBody.appendChild(createRow(row));
-    resultsBody.appendChild(createDetailRow(row));
+    frag.appendChild(createRow(row));
+    frag.appendChild(createDetailRow(row));
   }
+  resultsBody.appendChild(frag);
   updateLoadMoreBtn(displayedResults.length);
 }
 
@@ -419,9 +444,7 @@ function formatNum(n) {
 }
 
 function escHtml(s) {
-  const d = document.createElement('div');
-  d.textContent = s;
-  return d.innerHTML;
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
 
 // -- Period Picker ---------------------------------------------------------
@@ -576,19 +599,22 @@ async function loadKontoData() {
     const nrs = Object.keys(kontos).sort();
     statusEl.textContent = nrs.length + ' konton hittade, hämtar antal...';
 
-    const countPromises = nrs.map(async nr => {
-      const params = new URLSearchParams({ _limit: 1, _offset: 0, konto_nr: nr });
-      const url = API_BASE + '?' + params.toString();
-      try {
-        const data = await fetchWithRetry(url);
-        kontos[nr].count = data.resultCount || 0;
-      } catch (e) { /* keep sampled count */ }
-    });
-
     const CONCURRENCY = 6;
-    for (let i = 0; i < countPromises.length; i += CONCURRENCY) {
-      await Promise.all(countPromises.slice(i, i + CONCURRENCY));
+    let countIdx = 0;
+    async function countWorker() {
+      while (countIdx < nrs.length) {
+        const nr = nrs[countIdx++];
+        const params = new URLSearchParams({ _limit: 1, _offset: 0, konto_nr: nr });
+        const url = API_BASE + '?' + params.toString();
+        try {
+          const data = await fetchWithRetry(url);
+          kontos[nr].count = data.resultCount || 0;
+        } catch (e) { /* keep sampled count */ }
+      }
     }
+    const countWorkers = [];
+    for (let i = 0; i < Math.min(CONCURRENCY, nrs.length); i++) countWorkers.push(countWorker());
+    await Promise.all(countWorkers);
 
     kontoData = kontos;
     renderKontoList();
@@ -687,19 +713,22 @@ async function loadLevData() {
     const names = Object.keys(levs).sort((a, b) => a.localeCompare(b, 'sv'));
     statusEl.textContent = names.length + ' leverantörer hittade, hämtar antal...';
 
-    const countPromises = names.map(async name => {
-      const params = new URLSearchParams({ _limit: 1, _offset: 0, leverantor: name });
-      const url = API_BASE + '?' + params.toString();
-      try {
-        const data = await fetchWithRetry(url);
-        levs[name].count = data.resultCount || 0;
-      } catch (e) { /* keep 0 */ }
-    });
-
     const CONCURRENCY = 6;
-    for (let i = 0; i < countPromises.length; i += CONCURRENCY) {
-      await Promise.all(countPromises.slice(i, i + CONCURRENCY));
+    let levCountIdx = 0;
+    async function levCountWorker() {
+      while (levCountIdx < names.length) {
+        const name = names[levCountIdx++];
+        const params = new URLSearchParams({ _limit: 1, _offset: 0, leverantor: name });
+        const url = API_BASE + '?' + params.toString();
+        try {
+          const data = await fetchWithRetry(url);
+          levs[name].count = data.resultCount || 0;
+        } catch (e) { /* keep 0 */ }
+      }
     }
+    const levCountWorkers = [];
+    for (let i = 0; i < Math.min(CONCURRENCY, names.length); i++) levCountWorkers.push(levCountWorker());
+    await Promise.all(levCountWorkers);
 
     levData = levs;
     renderLevList();
@@ -758,6 +787,7 @@ const AC_FIELDS = [
 
 const acCache = {};
 let acActiveIdx = -1;
+let acAbort = null;
 
 AC_FIELDS.forEach(cfg => {
   const input = document.getElementById(cfg.inputId);
@@ -812,17 +842,21 @@ async function acFetch(cfg, query) {
     return;
   }
 
+  if (acAbort) acAbort.abort();
+  const abort = new AbortController();
+  acAbort = abort;
+
   list.innerHTML = '<li class="ac-hint"><span class="ac-spinner"></span>Söker...</li>';
   list.classList.add('open');
 
   try {
     const params = new URLSearchParams({
-      _limit: 500,
+      _limit: 100,
       _offset: 0,
       [cfg.apiField]: query + '*'
     });
     const url = API_BASE + '?' + params.toString();
-    const data = await fetchWithRetry(url);
+    const data = await fetchWithRetry(url, 2, 1000, abort.signal);
     const values = new Set();
     for (const r of (data.results || [])) {
       const v = r[cfg.apiField];
@@ -832,6 +866,7 @@ async function acFetch(cfg, query) {
     acCache[cacheKey] = sorted;
     acRender(list, sorted, cfg.inputId);
   } catch (e) {
+    if (e.name === 'AbortError') return;
     list.innerHTML = '<li class="ac-hint">Kunde inte hämta förslag</li>';
   }
 }
